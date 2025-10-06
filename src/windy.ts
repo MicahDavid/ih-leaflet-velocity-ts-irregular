@@ -1,5 +1,6 @@
 import Vector from "./vector";
 import Grid from "./grid";
+import IrregularGrid from "./irregularGrid";
 import ColorScale from "./colorScale";
 import Particule from "./particle";
 import AnimationBucket from "./animationBucket";
@@ -23,6 +24,7 @@ export interface WindyOptions {
 export default class Windy {
 
   private grid: any;
+  private isIrregularGrid: boolean = false;
   private λ0: number;
   private φ0: number;
   private Δλ: number;
@@ -121,44 +123,89 @@ export default class Windy {
     })
 
 
-    this.grid = new Grid(
-      grid,
-      uData.header.la1,
-      uData.header.lo1,
-      uData.header.dy,
-      uData.header.dx,
-      uData.header.ny,
-      uData.header.nx
-    );
+      // Check if data contains converted lat/lng arrays (from pixel coordinates)
+      if (data.latitudes && data.longitudes) {
+          this.isIrregularGrid = true;
 
-    this.λ0 = uData.header.lo1;
-    this.φ0 = uData.header.la1;
+          // Extract u, v, and optional wave height data
+          //const uValues = data.u || data.uData || [];
+          //const vValues = data.v || data.vData || [];
+          //const whValues = data.waveHeight || [];
 
-    this.Δλ = uData.header.dx;
-    this.Δφ = uData.header.dy
+          // Build vector grid
+          uData.data.forEach((u: number, index: number) => {
+              //const wh = waveHeight.data[index] !== undefined ? waveHeight.data[index] : undefined;
+              const vector = new Vector(u, vData.data[index], undefined);
+              grid.push(vector);
+          });
 
-    this.ni = uData.header.nx;
-    this.nj = uData.header.ny; // number of grid points W-E and N-S (e.g., 144 x 73)
+          // Determine grid dimensions with explicit typing for sort
+          const uniqueLng = data.longitudes
+          const uniqueLat = data.latitudes
+          const width = uniqueLng.length;
+          const height = uniqueLat.length;
 
-    var p = 0;
-    var isContinuous = Math.floor(this.ni * this.Δλ) >= 360;
+          // Use IrregularGrid for Web Mercator data
+          this.grid = new IrregularGrid(
+              grid,
+              uniqueLat,
+              uniqueLng
+          );
 
-    for (var j = 0; j < this.nj; j++) {
-      var row = [];
-      for (var i = 0; i < this.ni; i++, p++) {
-        row[i] = this.grid.data[p];
+          // Set bounds for the irregular grid
+          this.λ0 = Math.min(...data.longitudes);
+          this.φ0 = Math.max(...data.latitudes);
+          this.ni = width;
+          this.nj = height;
+
+          // Set approximate deltas (not used in irregular grid interpolation)
+          this.Δλ = width > 1 ? (Math.max(...data.longitudes) - this.λ0) / (width - 1) : 1;
+          this.Δφ = height > 1 ? (this.φ0 - Math.min(...data.latitudes)) / (height - 1) : 1;
+
+      } else if (uData && vData) {
+          // Original format - backward compatibility
+          this.isIrregularGrid = false;
+
+          uData.data.forEach((u: number, index: number) => {
+              const wh = waveHeight !== null ? waveHeight.data[index] : undefined;
+              grid.push(new Vector(u, vData.data[index], wh));
+          });
+
+          this.grid = new Grid(
+              grid,
+              uData.header.la1,
+              uData.header.lo1,
+              uData.header.dy,
+              uData.header.dx,
+              uData.header.ny,
+              uData.header.nx
+          );
+
+          this.λ0 = uData.header.lo1;
+          this.φ0 = uData.header.la1;
+          this.Δλ = uData.header.dx;
+          this.Δφ = uData.header.dy;
+          this.ni = uData.header.nx;
+          this.nj = uData.header.ny;
+
+          // Build 2D grid structure for regular grids only
+          let p = 0;
+          const isContinuous = Math.floor(this.ni * this.Δλ) >= 360;
+
+          for (let j = 0; j < this.nj; j++) {
+              const row = [];
+              for (let i = 0; i < this.ni; i++, p++) {
+                  row[i] = this.grid.data[p];
+              }
+              if (isContinuous) {
+                  row.push(row[0]);
+              }
+              this.grid[j] = row;
+          }
+      } else {
+          console.warn("Data format not recognized");
+          return;
       }
-      if (isContinuous) {
-        // For wrapped grids, duplicate first column as last column to simplify interpolation logic
-        row.push(row[0]);
-      }
-      this.grid[j] = row;
-    }
-
-    if (this.autoColorRange) {
-      const minMax = this.grid.valueRange;
-      this.colorScale.setMinMax(minMax[0], minMax[1]);
-    }
   }
 
   /* Get interpolated grid value from Lon/Lat position
@@ -170,6 +217,12 @@ export default class Windy {
     if (!this.grid) {
       return null;
     }
+
+      // IrregularGrid has its own get method
+      if (this.isIrregularGrid) {
+          return this.grid.get(λ, φ);
+      }
+
     var i = this.floorMod(λ - this.λ0, 360) / this.Δλ; // calculate longitude index in wrapped range [0, 360)
     var j = (this.φ0 - φ) / this.Δφ; // calculate latitude index in direction +90 to -90
 
@@ -308,7 +361,7 @@ export default class Windy {
   private verticalOffset(offset: number, maxOffset: number): number {
     return 7 * Math.cos((Math.abs(offset) / maxOffset) * (Math.PI / 2));
   }
-  
+
   private generateOffsets(count: number): number[] {
     let numDivisions = (count - 1) / 2;
       let offsets = [];
@@ -332,8 +385,8 @@ export default class Windy {
     if (waveHeight < 30) return 13;
     return 14;
   }
-  
-  
+
+
 
   private drawWaves() {
     const g = this.context2D;
@@ -346,51 +399,51 @@ export default class Windy {
     );
     g.globalCompositeOperation = "lighter";
     g.globalAlpha = this.opacity;
-  
+
     this.animationBucket.getBuckets().forEach((bucket: Particule[], i: number) => {
       if (bucket.length > 0) {
         g.beginPath();
         g.strokeStyle = this.colorScale.colorAt(i);
-  
+
         bucket.forEach((particle: Particule) => {
           const dx = particle.xt - particle.x;
           const dy = particle.yt - particle.y;
           const mag = Math.sqrt(dx * dx + dy * dy);
-  
+
           const perpX = mag ? -dy / mag : 0;
           const perpY = mag ? dx / mag : 0;
           const normX = mag ? dx / mag : 0;
           const normY = mag ? dy / mag : 0;
-  
+
           const waveHeight =  particle.waveHeight || 1;
           const numWaveParticles = this.calculateWaveParticles(waveHeight);
           const offsets = this.generateOffsets(numWaveParticles);
           const SEPARATION = this.wavesParticlesSeparation;
           const maxOffset = 3.5;
-  
+
           offsets.forEach((offset) => {
-              
+
               const shiftX = perpX * offset * SEPARATION;
               const shiftY = perpY * offset * SEPARATION;
-              
+
               const vOff = this.verticalOffset(offset, maxOffset);
-              
+
               const startX = particle.x + shiftX + normX * vOff;
               const startY = particle.y + shiftY + normY * vOff;
               const endX = particle.xt + shiftX + normX * vOff;
               const endY = particle.yt + shiftY + normY * vOff;
-              
+
               g.moveTo(startX, startY);
               g.lineTo(endX, endY);
           });
-  
+
           particle.x = particle.xt;
           particle.y = particle.yt;
         });
-  
+
         g.stroke();
       }
     });
   }
-  
+
 }
