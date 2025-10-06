@@ -91,26 +91,28 @@ export default class Windy {
    * Load data
    * @param data
    */
-  public setData(data: any[]) {
+  public setData(data: any) {
     let uData: any = null;
     let vData: any = null;
     let waveHeight: any = null;
     const grid: Vector[] = [];
 
-    data.forEach((record) => {
-      switch (`${record.header.parameterCategory},${record.header.parameterNumber}`) {
-        case "1,2":
-        case "2,2":
-          uData = record;
-          break;
-        case "1,3":
-        case "2,3":
-          vData = record;
-          break;
-        default:
-          waveHeight = record;
+      if (Array.isArray(data)) {
+          data.forEach((record) => {
+              switch (`${record.header.parameterCategory},${record.header.parameterNumber}`) {
+                  case "1,2":
+                  case "2,2":
+                      uData = record;
+                      break;
+                  case "1,3":
+                  case "2,3":
+                      vData = record;
+                      break;
+                  default:
+                      waveHeight = record;
+              }
+          });
       }
-    });
 
     if (!uData || !vData) {
       console.warn("Data are not correct format");
