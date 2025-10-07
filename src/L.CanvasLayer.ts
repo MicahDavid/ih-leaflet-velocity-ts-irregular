@@ -19,6 +19,7 @@ export default class CanvasLayer {
 	private _canvas: HTMLCanvasElement;
 	private _frame: number;
 	private _del: any;
+    private _pendingRedraw: boolean = false; // Track if redraw is pending
 
 	public initialize(options: any) {
 		this._map = null;
@@ -38,10 +39,16 @@ export default class CanvasLayer {
 	}
 
 	public needRedraw() {
-		if (!this._frame) {
-			this._frame = L.Util.requestAnimFrame(this.drawLayer, this);
-		}
-		return this;
+        if (!this._map) {
+            console.warn('needRedraw called but map is not set yet, marking as pending');
+            this._pendingRedraw = true;
+            return this;
+        }
+
+        if (!this._frame) {
+            this._frame = L.Util.requestAnimFrame(this.drawLayer, this);
+        }
+        return this;
 	}
 
 	public getEvents() {
@@ -74,6 +81,13 @@ export default class CanvasLayer {
 
 		const del = this._del || this;
 		del.onLayerDidMount && del.onLayerDidMount(); // -- callback
+
+        // If there was a pending redraw before map was available, do it now
+        if (this._pendingRedraw) {
+            console.log('Executing pending redraw now that map is available');
+            this._pendingRedraw = false;
+        }
+
 		this.needRedraw();
 
 		setTimeout(() => {
@@ -85,12 +99,22 @@ export default class CanvasLayer {
 		const del = this._del || this;
 		del.onLayerWillUnmount && del.onLayerWillUnmount(); // -- callback
 
+        // Cancel any pending animation frames
+        if (this._frame) {
+            L.Util.cancelAnimFrame(this._frame);
+            this._frame = null;
+        }
 
-		map.getPanes().overlayPane.removeChild(this._canvas);
+        this._pendingRedraw = false;
+
+        if (this._canvas && map.getPanes().overlayPane) {
+            map.getPanes().overlayPane.removeChild(this._canvas);
+        }
 
 		map.off(this.getEvents() as any, this as any);
 
-		this._canvas = null;
+        this._canvas = null;
+        this._map = null; // Explicitly clear the map reference
 
 	}
 
@@ -100,6 +124,14 @@ export default class CanvasLayer {
 	}
 
 	public drawLayer() {
+        // Safety check - don't draw if map isn't available
+        if (!this._map) {
+            console.warn('CanvasLayer.drawLayer called but map is null, marking as pending');
+            this._pendingRedraw = true;
+            this._frame = null;
+            return;
+        }
+
 		// -- todo make the viewInfo properties flat objects.
 		const size = this._map.getSize();
 		const bounds = this._map.getBounds();
@@ -144,11 +176,26 @@ export default class CanvasLayer {
 	}
 
 	private onLayerDidResize(resizeEvent: any) {
+        if (!this._canvas) {
+            console.warn('onLayerDidResize called but canvas is null');
+            return;
+        }
+
 		this._canvas.width = resizeEvent.newSize.x;
 		this._canvas.height = resizeEvent.newSize.y;
 	}
 
 	private onLayerDidMove() {
+        if (!this._map) {
+            console.warn('onLayerDidMove called but map is null');
+            return;
+        }
+
+        if (!this._canvas) {
+            console.warn('onLayerDidMove called but canvas is null');
+            return;
+        }
+
 		var topLeft = this._map.containerPointToLayerPoint([0, 0]);
 		L.DomUtil.setPosition(this._canvas, topLeft);
 		this.drawLayer();

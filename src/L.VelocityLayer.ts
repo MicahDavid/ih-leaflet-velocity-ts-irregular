@@ -96,14 +96,12 @@ export default class VelocityLayer {
   }
 
   setData(data: any) {
-    this.options.data = data;
+      this.options.data = data;
 
-    if (this._windy) {
-    if (data.latitudes && data.longitudes && Array.isArray(data.latitudes) && Array.isArray(data.longitudes))
-        data._hasLatLng = true;
-      this._windy.setData(data);
-      this.clearAndRestart();
-    }
+      if (this._windy) {
+          this._windy.setData(data);
+          this.clearAndRestart();
+      }
 
     (<any>this).fire('load');
   }

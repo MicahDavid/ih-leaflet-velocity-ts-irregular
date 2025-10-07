@@ -17,6 +17,7 @@ export default class IrregularGrid {
     private latMax: number;
     private lonMin: number;
     private lonMax: number;
+    private crossesIDL = false;
 
     constructor(data: Vector[], latitudes: number[], longitudes: number[]) {
         this.data = data;
@@ -25,11 +26,41 @@ export default class IrregularGrid {
         this.width = longitudes.length;
         this.height = latitudes.length;
 
+        // Detect IDL crossing
+        this.crossesIDL = this.detectDateLineCrossing(longitudes);
+
         // Calculate bounds
         this.latMin = Math.min(...latitudes);
         this.latMax = Math.max(...latitudes);
-        this.lonMin = Math.min(...longitudes);
-        this.lonMax = Math.max(...longitudes);
+
+        if (this.crossesIDL) {
+            // For IDL crossing, normalize to 0-360 for bounds
+            const normalizedLongs = longitudes.map(lng => lng < 0 ? lng + 360 : lng);
+            this.lonMin = Math.min(...normalizedLongs);
+            this.lonMax = Math.max(...normalizedLongs);
+            //console.log('IrregularGrid: IDL crossing detected, normalized bounds:', this.lonMin, 'to', this.lonMax);
+        } else {
+            this.lonMin = Math.min(...longitudes);
+            this.lonMax = Math.max(...longitudes);
+        }
+    }
+
+    private detectDateLineCrossing(longitudes: number[]): boolean {
+        if (longitudes.length < 2) return false;
+
+        let hasPositive = false;
+        let hasNegative = false;
+
+        for (const lng of longitudes) {
+            if (lng > 90) hasPositive = true;
+            if (lng < -90) hasNegative = true;
+
+            if (hasPositive && hasNegative) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     get valueRange(): number[] {
@@ -52,14 +83,25 @@ export default class IrregularGrid {
      */
     get(λ: number, φ: number): Vector {
 
+        // Normalize longitude for IDL crossing case
+        let queryLon = λ;
+        if (this.crossesIDL && λ < 0) {
+            queryLon = λ + 360;
+        }
+
         // Quick bounds check
-        if (λ < this.lonMin || λ > this.lonMax || φ < this.latMin || φ > this.latMax) {
+        if (queryLon < this.lonMin || queryLon > this.lonMax || φ < this.latMin || φ > this.latMax) {
+            //if (shouldLog) {
+            //    console.log('Out of bounds, returning zero vector');
+            //}
             return new Vector(0, 0, 0);
         }
 
+
         // Find the longitude indices that bracket the query point
-        const lonIndices = this.findBracketingIndices(this.longitudes, λ);
-        const latIndices = this.findBracketingIndices(this.latitudes, φ);
+        const lonIndices = this.findBracketingIndices(this.longitudes, λ, this.crossesIDL);
+        const latIndices = this.findBracketingIndices(this.latitudes, φ, false);
+
 
         if (!lonIndices || !latIndices) {
             return new Vector(0, 0, 0);
@@ -81,8 +123,15 @@ export default class IrregularGrid {
         }
 
         // Get actual coordinates of the 4 corners
-        const lon0 = this.longitudes[lonIdx0];
-        const lon1 = this.longitudes[lonIdx1];
+        let lon0 = this.longitudes[lonIdx0];
+        let lon1 = this.longitudes[lonIdx1];
+
+        // Normalize corner longitudes for IDL case
+        if (this.crossesIDL) {
+            if (lon0 < 0) lon0 += 360;
+            if (lon1 < 0) lon1 += 360;
+        }
+
         const lat0 = this.latitudes[latIdx0];
         const lat1 = this.latitudes[latIdx1];
 
@@ -104,20 +153,22 @@ export default class IrregularGrid {
      * Find the two indices in a sorted array that bracket the given value
      * Returns null if value is out of bounds
      */
-    private findBracketingIndices(arr: number[], value: number): { i0: number, i1: number } | null {
-        //const shouldLog = this.debugCounter++ % 1000001 === 0;
+    private findBracketingIndices(arr: number[], value: number, normalizeForIDL: boolean = false): { i0: number, i1: number } | null {
+        // Normalize array values if crossing IDL
+        const searchArr = normalizeForIDL ? arr.map(lng => lng < 0 ? lng + 360 : lng) : arr;
+        const searchValue = normalizeForIDL && value < 0 ? value + 360 : value;
+
 
         // Handle edge cases - check against BOTH ends regardless of order
-        const minVal = Math.min(arr[0], arr[arr.length - 1]);
-        const maxVal = Math.max(arr[0], arr[arr.length - 1]);
+        const minVal = Math.min(searchArr[0], searchArr[searchArr.length - 1]);
+        const maxVal = Math.max(searchArr[0], searchArr[searchArr.length - 1]);
 
-        if (value < minVal || value > maxVal) {
+        if (searchValue < minVal || searchValue > maxVal) {
             return null;
         }
 
         // Determine if array is ascending or descending
-        const isAscending = arr[0] < arr[arr.length - 1];
-
+        const isAscending = searchArr[0] < searchArr[searchArr.length - 1];
 
         // Binary search for efficiency
         let left = 0;
@@ -126,19 +177,19 @@ export default class IrregularGrid {
         while (left < right - 1) {
             const mid = Math.floor((left + right) / 2);
 
-            if (arr[mid] === value) {
+            if (searchArr[mid] === searchValue) {
                 return { i0: mid, i1: mid };
             }
 
             if (isAscending) {
-                if (arr[mid] < value) {
+                if (searchArr[mid] < searchValue) {
                     left = mid;
                 } else {
                     right = mid;
                 }
             } else {
                 // Descending array
-                if (arr[mid] > value) {
+                if (searchArr[mid] > searchValue) {
                     left = mid;
                 } else {
                     right = mid;

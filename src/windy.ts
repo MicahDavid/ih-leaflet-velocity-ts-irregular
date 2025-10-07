@@ -154,8 +154,33 @@ export default class Windy {
               uniqueLng
           );
 
+          // Handle International Date Line crossing for bounds
+          const longitudes = data.longitudes;
+          const crossesIDL = this.detectDateLineCrossing(longitudes);
+
+          if (crossesIDL) {
+              // Normalize longitudes to 0-360 range for IDL crossing case
+              const normalizedLongs = longitudes.map((lng: number) => lng < 0 ? lng + 360 : lng);
+              this.λ0 = Math.min(...normalizedLongs);
+              const λ1 = Math.max(...normalizedLongs);
+              this.Δλ = width > 1 ? (λ1 - this.λ0) / (width - 1) : 1;
+
+              //console.log('Normalized longitude range:', this.λ0, 'to', λ1);
+              //console.log('Δλ:', this.Δλ);
+
+              // Convert back to -180/180 range if needed
+              if (this.λ0 > 180) {
+                  this.λ0 -= 360;
+              }
+
+          } else {
+              // Standard case - no IDL crossing
+              this.λ0 = Math.min(...longitudes);
+              const λ1 = Math.max(...longitudes);
+              this.Δλ = width > 1 ? (λ1 - this.λ0) / (width - 1) : 1;
+          }
+
           // Set bounds for the irregular grid
-          this.λ0 = Math.min(...data.longitudes);
           this.φ0 = Math.max(...data.latitudes);
           this.ni = width;
           this.nj = height;
@@ -285,6 +310,31 @@ export default class Windy {
   private isValue(x: any) {
     return x !== null && x !== undefined;
   };
+
+    /**
+     * Detect if longitudes cross the International Date Line
+     * @param longitudes Array of longitude values
+     * @returns true if the data crosses the IDL
+     */
+    private detectDateLineCrossing(longitudes: number[]): boolean {
+        if (longitudes.length < 2) return false;
+
+        let hasPositive = false;
+        let hasNegative = false;
+
+        for (const lng of longitudes) {
+            if (lng > 90) hasPositive = true;
+            if (lng < -90) hasNegative = true;
+
+            // If we have both far-east positive and far-west negative values,
+            // it's likely crossing the IDL
+            if (hasPositive && hasNegative) {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
   private bilinearInterpolateVector(x: number, y: number, g00: any, g10: any, g01: any, g11: any) {
     var rx = (1 - x);
