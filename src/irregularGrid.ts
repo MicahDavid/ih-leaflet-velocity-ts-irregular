@@ -99,7 +99,7 @@ export default class IrregularGrid {
 
 
         // Find the longitude indices that bracket the query point
-        const lonIndices = this.findBracketingIndices(this.longitudes, λ, this.crossesIDL);
+        const lonIndices = this.findBracketingIndices(this.longitudes, queryLon, this.crossesIDL);
         const latIndices = this.findBracketingIndices(this.latitudes, φ, false);
 
 
@@ -135,8 +135,8 @@ export default class IrregularGrid {
         const lat0 = this.latitudes[latIdx0];
         const lat1 = this.latitudes[latIdx1];
 
-        // Calculate interpolation weights
-        const tx = lon1 !== lon0 ? (λ - lon0) / (lon1 - lon0) : 0;
+        // Calculate interpolation weights using the same normalized longitude
+        const tx = lon1 !== lon0 ? (queryLon - lon0) / (lon1 - lon0) : 0;
         const ty = lat1 !== lat0 ? (φ - lat0) / (lat1 - lat0) : 0;
 
         // Clamp to [0, 1]

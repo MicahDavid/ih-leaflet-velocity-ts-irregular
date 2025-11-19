@@ -135,11 +135,8 @@ export default class Windy {
           //const whValues = data.waveHeight || [];
 
           // Build vector grid
-          uData.data.forEach((u: number, index: number) => {
-              //const wh = waveHeight.data[index] !== undefined ? waveHeight.data[index] : undefined;
-              const vector = new Vector(u, vData.data[index], undefined);
-              grid.push(vector);
-          });
+          // NOTE: grid was already filled above from uData/vData.
+          // Avoid pushing duplicates here.
 
           // Determine grid dimensions with explicit typing for sort
           const uniqueLng = data.longitudes
