@@ -1,12 +1,14 @@
 {
   "name": "ih-leaflet-velocity-ts-irregular",
-  "version": "1.0.2",
+  "version": "1.0.39",
   "description": "Visualise velocity layers with leaflet - Irregular Grid",
   "main": "dist/leaflet-velocity.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "build": "webpack --stats-modules --mode production",
-    "watch": "webpack --progress --watch --mode development"
+    "watch": "webpack --progress --watch --mode development",
+    "prepare": "npm run build"
+
   },
   "author": "Micah Sklut <micah@weathercaptain.com>",
   "contributors": [

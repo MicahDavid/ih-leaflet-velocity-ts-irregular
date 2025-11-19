@@ -52,6 +52,7 @@ export default class Windy {
 
 
   constructor(options: WindyOptions) {
+    console.log("[Velocity Debug] Windy.constructor received debug:", (options as any).debug, "hasData:", !!options.data);
     this.setOptions(options);
     this.canvas = options.canvas;
     if (options.data) {
@@ -79,6 +80,18 @@ export default class Windy {
       this.particleMultiplier = options.particleMultiplier || 1 / 7000;
       this.velocityScale = 0.0045;
       this.wavesParticlesSeparation = options.wavesParticlesSeparation || 3.5;
+    }
+
+    // Debug hooks
+    // @ts-ignore - allow optional debug fields in options
+    this["debug"] = (options as any).debug === true;
+    // @ts-ignore
+    this["forceVelocityScale"] = (options as any).forceVelocityScale;
+
+    // One-time confirmation that debug is on
+    // @ts-ignore
+    if (this["debug"]) {
+      console.log("[Velocity Debug] setOptions -> debug enabled");
     }
   }
 
@@ -115,7 +128,7 @@ export default class Windy {
       }
 
     if (!uData || !vData) {
-      console.warn("Data are not correct format");
+      console.warn("Data are not correct formats");
       return;
     }
 
@@ -128,6 +141,7 @@ export default class Windy {
       // Check if data contains converted lat/lng arrays (from pixel coordinates)
       if (data.latitudes && data.longitudes) {
           this.isIrregularGrid = true;
+          console.warn('irregular grid detected')
 
           // Extract u, v, and optional wave height data
           //const uValues = data.u || data.uData || [];
@@ -230,6 +244,38 @@ export default class Windy {
           console.warn("Data format not recognized");
           return;
       }
+
+      // Debug: verify grid dimensions and key flags
+      // @ts-ignore
+      if (this["debug"]) {
+        const expected = (this.ni || 0) * (this.nj || 0);
+        console.log("[Velocity Debug] setData -> isIrregularGrid:", this.isIrregularGrid, "ni:", this.ni, "nj:", this.nj, "grid.length:", grid.length, "expected:", expected);
+        if (expected && grid.length !== expected) {
+          console.warn("[Velocity Debug] grid size mismatch: data != lat*lon");
+        }
+      }
+
+      // Debug intensity range
+      // @ts-ignore
+      if (this["debug"]) {
+        try {
+          const range = this.grid.valueRange ? this.grid.valueRange : null;
+          if (range) {
+            console.log("[Velocity Debug] intensity range:", range);
+          } else {
+            // Fallback manual range
+            let min = Number.POSITIVE_INFINITY, max = Number.NEGATIVE_INFINITY;
+            grid.forEach((v: any) => {
+              const s = Math.sqrt(v.u * v.u + v.v * v.v);
+              min = Math.min(min, s); max = Math.max(max, s);
+            });
+            console.log("[Velocity Debug] computed intensity range:", [min, max]);
+          }
+          console.log("[Velocity Debug] grid size:", this.nj, "x", this.ni, "=", this.ni * this.nj);
+        } catch (e) {
+          console.warn("[Velocity Debug] range failure:", e);
+        }
+      }
   }
 
   /* Get interpolated grid value from Lon/Lat position
@@ -286,6 +332,11 @@ export default class Windy {
     }
 
     this.then = new Date().getTime();
+
+    // @ts-ignore
+    if (this["debug"]) {
+      console.log("[Velocity Debug] start -> particles:", this.particuleCount, "waveMode:", this.waveMode, "opacity:", this.opacity, "lineWidth:", this.particleLineWidth);
+    }
 
     this.frame();
   }
@@ -348,12 +399,30 @@ export default class Windy {
 
   private getParticuleWind(p: Particule): Vector {
     const lngLat = this.layer.canvasToMap(p.x, p.y);
-    const wind = this.grid.get(lngLat[0], lngLat[1]);
+
+    // Wrap longitude into [-180, 180] to handle world copies at low zoom
+    const λWrapped = ((lngLat[0] + 180) % 360 + 360) % 360 - 180;
+
+    const wind = this.grid.get(λWrapped, lngLat[1]);
     p.intensity = wind.intensity;
     p.waveHeight = wind.waveHeight;
     const mapArea = this.layer.mapBound.height * this.layer.mapBound.width;
-    var velocityScale = this.velocityScale * Math.pow(mapArea, 0.4);
-    this.layer.distort(lngLat[0], lngLat[1], p.x, p.y, velocityScale, wind);
+
+    // @ts-ignore
+    const forced = this["forceVelocityScale"];
+    var velocityScale = forced != null ? forced : (this.velocityScale * Math.pow(mapArea, 0.4));
+
+    this.layer.distort(λWrapped, lngLat[1], p.x, p.y, velocityScale, wind);
+
+    // Optional debug sampling
+    // @ts-ignore
+    if (this["debug"]) {
+      if (!wind || (!isFinite(wind.u) || !isFinite(wind.v) || (Math.abs(wind.u) + Math.abs(wind.v) === 0))) {
+        if (Math.random() < 0.001) {
+          console.log("[Velocity Debug] zero/invalid wind at", { lng: λWrapped, lat: lngLat[1] });
+        }
+      }
+    }
     return wind;
   }
 
