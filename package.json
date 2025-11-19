@@ -1,6 +1,6 @@
 {
   "name": "ih-leaflet-velocity-ts-irregular",
-  "version": "1.0.36",
+  "version": "1.0.37",
   "description": "Visualise velocity layers with leaflet - Irregular Grid",
   "main": "dist/leaflet-velocity.js",
   "scripts": {

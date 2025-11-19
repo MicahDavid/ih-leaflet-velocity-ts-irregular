@@ -18,7 +18,7 @@ export default class VelocityLayer {
   private _paneName: string = null;
 
   constructor() {
-      console.log('hello world')
+      console.warn('hello world')
     this.options = {
         debug: false,
       displayValues: true,
