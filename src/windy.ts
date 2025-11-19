@@ -128,8 +128,7 @@ export default class Windy {
       }
 
     if (!uData || !vData) {
-      console.warn("Data are not correct format");
-      console.log("Data are not correct format");
+      console.warn("Data are not correct formats");
       return;
     }
 
