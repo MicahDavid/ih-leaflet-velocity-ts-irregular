@@ -52,6 +52,7 @@ export default class Windy {
 
 
   constructor(options: WindyOptions) {
+    console.log("[Velocity Debug] Windy.constructor received debug:", (options as any).debug, "hasData:", !!options.data);
     this.setOptions(options);
     this.canvas = options.canvas;
     if (options.data) {

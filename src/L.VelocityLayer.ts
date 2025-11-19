@@ -156,7 +156,15 @@ export default class VelocityLayer {
       ...this.options,
       canvas: this._canvasLayer.getCanvas()
     }
+
+    // Confirm what's passed into Windy
+    console.log("[Velocity Debug] VelocityLayer.initWindy options.debug:", (options as any).debug);
+
     this._windy = new Windy(options);
+
+    // Optionally confirm Windy received/recognized debug
+    // (will be true only if Windy sets its internal flag from options)
+    console.log("[Velocity Debug] after Windy ctor, windy.debug:", (this._windy as any)["debug"]);
 
     // prepare context global var, start drawing
     this._context = this._canvasLayer.getCanvas().getContext('2d');
