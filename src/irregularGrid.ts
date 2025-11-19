@@ -89,11 +89,14 @@ export default class IrregularGrid {
             queryLon = λ + 360;
         }
 
-        // Quick bounds check with tiny epsilon
-        const EPS = 1e-6;
-        if (queryLon < this.lonMin - EPS || queryLon > this.lonMax + EPS || φ < this.latMin - EPS || φ > this.latMax + EPS) {
+        // Quick bounds check
+        if (queryLon < this.lonMin || queryLon > this.lonMax || φ < this.latMin || φ > this.latMax) {
+            //if (shouldLog) {
+            //    console.log('Out of bounds, returning zero vector');
+            //}
             return new Vector(0, 0, 0);
         }
+
 
         // Find the longitude indices that bracket the query point
         const lonIndices = this.findBracketingIndices(this.longitudes, queryLon, this.crossesIDL);
@@ -152,58 +155,41 @@ export default class IrregularGrid {
      */
     private findBracketingIndices(arr: number[], value: number, normalizeForIDL: boolean = false): { i0: number, i1: number } | null {
         // Normalize array values if crossing IDL
-        const raw = arr;
-        const normalized = normalizeForIDL ? raw.map(lng => lng < 0 ? lng + 360 : lng) : raw;
-        const EPS = 1e-6;
+        const searchArr = normalizeForIDL ? arr.map(lng => lng < 0 ? lng + 360 : lng) : arr;
+        const searchValue = normalizeForIDL && value < 0 ? value + 360 : value;
 
-        // If IDL, "unroll" into a strictly increasing sequence using a base so we can binary-search
-        let base = normalized[0];
-        let searchArr: number[];
-        let searchValue = normalizeForIDL ? (value < 0 ? value + 360 : value) : value;
 
-        if (normalizeForIDL) {
-            // Use lonMin as base if available to minimize jumps
-            base = Math.min(...normalized);
-            searchArr = normalized.map(v => (v < base ? v + 360 : v));
-            if (searchValue < base) searchValue += 360;
-        } else {
-            searchArr = normalized.slice();
-        }
-
+        // Handle edge cases - check against BOTH ends regardless of order
         const minVal = Math.min(searchArr[0], searchArr[searchArr.length - 1]);
         const maxVal = Math.max(searchArr[0], searchArr[searchArr.length - 1]);
 
-        if (searchValue < minVal - EPS || searchValue > maxVal + EPS) {
+        if (searchValue < minVal || searchValue > maxVal) {
             return null;
         }
 
         // Determine if array is ascending or descending
-        const isAscending = searchArr[0] <= searchArr[searchArr.length - 1];
+        const isAscending = searchArr[0] < searchArr[searchArr.length - 1];
 
-        // Binary search
+        // Binary search for efficiency
         let left = 0;
         let right = arr.length - 1;
 
-        // Exact match shortcut
-        // (use EPS to account for float noise)
-        for (let i = 0; i < searchArr.length; i++) {
-            if (Math.abs(searchArr[i] - searchValue) <= EPS) {
-                return { i0: i, i1: i };
-            }
-        }
-
         while (left < right - 1) {
             const mid = Math.floor((left + right) / 2);
-            const midVal = searchArr[mid];
+
+            if (searchArr[mid] === searchValue) {
+                return { i0: mid, i1: mid };
+            }
 
             if (isAscending) {
-                if (midVal < searchValue) {
+                if (searchArr[mid] < searchValue) {
                     left = mid;
                 } else {
                     right = mid;
                 }
             } else {
-                if (midVal > searchValue) {
+                // Descending array
+                if (searchArr[mid] > searchValue) {
                     left = mid;
                 } else {
                     right = mid;
