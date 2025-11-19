@@ -348,12 +348,16 @@ export default class Windy {
 
   private getParticuleWind(p: Particule): Vector {
     const lngLat = this.layer.canvasToMap(p.x, p.y);
-    const wind = this.grid.get(lngLat[0], lngLat[1]);
+
+    // Wrap longitude into [-180, 180] to handle world copies at low zoom
+    const λWrapped = ((lngLat[0] + 180) % 360 + 360) % 360 - 180;
+
+    const wind = this.grid.get(λWrapped, lngLat[1]);
     p.intensity = wind.intensity;
     p.waveHeight = wind.waveHeight;
     const mapArea = this.layer.mapBound.height * this.layer.mapBound.width;
     var velocityScale = this.velocityScale * Math.pow(mapArea, 0.4);
-    this.layer.distort(lngLat[0], lngLat[1], p.x, p.y, velocityScale, wind);
+    this.layer.distort(λWrapped, lngLat[1], p.x, p.y, velocityScale, wind);
     return wind;
   }
 
