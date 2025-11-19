@@ -1,4 +1,3 @@
-
 import Vector from "./vector";
 
 /**
@@ -19,6 +18,13 @@ export default class IrregularGrid {
     private lonMax: number;
     private crossesIDL = false;
 
+    // Precomputed/cached for performance
+    private EPS = 1e-6;
+    private normLongitudes: number[] | null = null;      // longitudes normalized to [0,360)
+    private unrolledLongitudes: number[] | null = null;  // strictly increasing sequence for IDL bracketing
+    private latAscending: boolean;                       // for non-IDL lat bracketing
+    private lonAscending: boolean;                       // for non-IDL lon bracketing
+
     constructor(data: Vector[], latitudes: number[], longitudes: number[]) {
         this.data = data;
         this.latitudes = latitudes;
@@ -33,15 +39,35 @@ export default class IrregularGrid {
         this.latMin = Math.min(...latitudes);
         this.latMax = Math.max(...latitudes);
 
+        // Ascending flag for lats (used by binary search when not IDL)
+        this.latAscending = latitudes[0] <= latitudes[latitudes.length - 1];
+
         if (this.crossesIDL) {
-            // For IDL crossing, normalize to 0-360 for bounds
-            const normalizedLongs = longitudes.map(lng => lng < 0 ? lng + 360 : lng);
-            this.lonMin = Math.min(...normalizedLongs);
-            this.lonMax = Math.max(...normalizedLongs);
+            // Precompute normalized and unrolled longitudes once
+            this.normLongitudes = longitudes.map(lng => lng < 0 ? lng + 360 : lng);
+
+            // Build the strictly increasing unrolled array
+            this.unrolledLongitudes = new Array(this.normLongitudes.length);
+            this.unrolledLongitudes[0] = this.normLongitudes[0];
+            for (let i = 1; i < this.normLongitudes.length; i++) {
+                let v = this.normLongitudes[i];
+                if (v + this.EPS < this.normLongitudes[i - 1]) {
+                    v += 360;
+                }
+                if (v + this.EPS < this.unrolledLongitudes[i - 1]) {
+                    v += 360 * Math.ceil((this.unrolledLongitudes[i - 1] - v) / 360);
+                }
+                this.unrolledLongitudes[i] = v;
+            }
+
+            // Bounds from normalized values
+            this.lonMin = Math.min(...this.normLongitudes);
+            this.lonMax = Math.max(...this.normLongitudes);
             //console.log('IrregularGrid: IDL crossing detected, normalized bounds:', this.lonMin, 'to', this.lonMax);
         } else {
             this.lonMin = Math.min(...longitudes);
             this.lonMax = Math.max(...longitudes);
+            this.lonAscending = longitudes[0] <= longitudes[longitudes.length - 1];
         }
     }
 
@@ -83,25 +109,25 @@ export default class IrregularGrid {
      */
     get(λ: number, φ: number): Vector {
 
-        // Normalize longitude for IDL crossing case
+        // Normalize longitude for IDL crossing case and reuse cached arrays
         let queryLon = λ;
-        if (this.crossesIDL && λ < 0) {
-            queryLon = λ + 360;
+        if (this.crossesIDL) {
+            // Bring any longitude into [0, 360)
+            queryLon = ((λ % 360) + 360) % 360;
         }
 
-        // Quick bounds check
-        if (queryLon < this.lonMin || queryLon > this.lonMax || φ < this.latMin || φ > this.latMax) {
-            //if (shouldLog) {
-            //    console.log('Out of bounds, returning zero vector');
-            //}
+        // Quick bounds check with small epsilon to tolerate float noise
+        if (queryLon < this.lonMin - this.EPS || queryLon > this.lonMax + this.EPS || φ < this.latMin - this.EPS || φ > this.latMax + this.EPS) {
             return new Vector(0, 0, 0);
         }
 
-
         // Find the longitude indices that bracket the query point
-        const lonIndices = this.findBracketingIndices(this.longitudes, queryLon, this.crossesIDL);
+        const lonIndices = this.findBracketingIndices(
+            this.crossesIDL ? (this.unrolledLongitudes as number[]) : this.longitudes,
+            queryLon,
+            this.crossesIDL
+        );
         const latIndices = this.findBracketingIndices(this.latitudes, φ, false);
-
 
         if (!lonIndices || !latIndices) {
             return new Vector(0, 0, 0);
@@ -117,16 +143,15 @@ export default class IrregularGrid {
         const g01 = this.data[latIdx1 * this.width + lonIdx0];
         const g11 = this.data[latIdx1 * this.width + lonIdx1];
 
-
         if (!this.isValue(g00) || !this.isValue(g10) || !this.isValue(g01) || !this.isValue(g11)) {
             return new Vector(0, 0, 0);
         }
 
-        // Get actual coordinates of the 4 corners
+        // Corner coordinates
         let lon0 = this.longitudes[lonIdx0];
         let lon1 = this.longitudes[lonIdx1];
 
-        // Normalize corner longitudes for IDL case
+        // Normalize corners into [0, 360) for IDL case
         if (this.crossesIDL) {
             if (lon0 < 0) lon0 += 360;
             if (lon1 < 0) lon1 += 360;
@@ -135,17 +160,14 @@ export default class IrregularGrid {
         const lat0 = this.latitudes[latIdx0];
         const lat1 = this.latitudes[latIdx1];
 
-        // Calculate interpolation weights using the same normalized longitude
+        // Interpolation weights using the same normalized longitude
         const tx = lon1 !== lon0 ? (queryLon - lon0) / (lon1 - lon0) : 0;
         const ty = lat1 !== lat0 ? (φ - lat0) / (lat1 - lat0) : 0;
 
-        // Clamp to [0, 1]
         const x = Math.max(0, Math.min(1, tx));
         const y = Math.max(0, Math.min(1, ty));
 
-        const result = this.interpolation(x, y, g00, g10, g01, g11);
-
-        return result;
+        return this.interpolation(x, y, g00, g10, g01, g11);
 
     }
 
@@ -154,49 +176,43 @@ export default class IrregularGrid {
      * Returns null if value is out of bounds
      */
     private findBracketingIndices(arr: number[], value: number, normalizeForIDL: boolean = false): { i0: number, i1: number } | null {
-        // Normalize array values if crossing IDL
-        const searchArr = normalizeForIDL ? arr.map(lng => lng < 0 ? lng + 360 : lng) : arr;
-        const searchValue = normalizeForIDL && value < 0 ? value + 360 : value;
+        // If IDL, we search in the precomputed unrolled array
+        if (normalizeForIDL) {
+            const unrolled = this.unrolledLongitudes as number[];
+            let sv = ((value % 360) + 360) % 360; // [0,360)
+            if (sv + this.EPS < unrolled[0]) sv += 360;
 
+            const minU = unrolled[0];
+            const maxU = unrolled[unrolled.length - 1];
 
-        // Handle edge cases - check against BOTH ends regardless of order
-        const minVal = Math.min(searchArr[0], searchArr[searchArr.length - 1]);
-        const maxVal = Math.max(searchArr[0], searchArr[searchArr.length - 1]);
+            if (sv < minU - this.EPS || sv > maxU + this.EPS) return null;
 
-        if (searchValue < minVal || searchValue > maxVal) {
-            return null;
+            // Binary search on strictly increasing array
+            let left = 0, right = unrolled.length - 1;
+            while (left < right - 1) {
+                const mid = Math.floor((left + right) / 2);
+                const mv = unrolled[mid];
+                if (Math.abs(mv - sv) <= this.EPS) return { i0: mid, i1: mid };
+                if (mv < sv) left = mid; else right = mid;
+            }
+            return { i0: left, i1: right };
         }
 
-        // Determine if array is ascending or descending
-        const isAscending = searchArr[0] < searchArr[searchArr.length - 1];
+        // Non-IDL path (arr is original latitudes or original longitudes)
+        const isAscending = (arr === this.latitudes) ? this.latAscending : this.lonAscending;
+        const first = arr[0], last = arr[arr.length - 1];
+        const minVal = Math.min(first, last);
+        const maxVal = Math.max(first, last);
 
-        // Binary search for efficiency
-        let left = 0;
-        let right = arr.length - 1;
+        if (value < minVal - this.EPS || value > maxVal + this.EPS) return null;
 
+        let left = 0, right = arr.length - 1;
         while (left < right - 1) {
             const mid = Math.floor((left + right) / 2);
-
-            if (searchArr[mid] === searchValue) {
-                return { i0: mid, i1: mid };
-            }
-
-            if (isAscending) {
-                if (searchArr[mid] < searchValue) {
-                    left = mid;
-                } else {
-                    right = mid;
-                }
-            } else {
-                // Descending array
-                if (searchArr[mid] > searchValue) {
-                    left = mid;
-                } else {
-                    right = mid;
-                }
-            }
+            const mv = arr[mid];
+            if (Math.abs(mv - value) <= this.EPS) return { i0: mid, i1: mid };
+            if (isAscending ? (mv < value) : (mv > value)) left = mid; else right = mid;
         }
-
         return { i0: left, i1: right };
     }
 

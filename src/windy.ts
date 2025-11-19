@@ -346,16 +346,22 @@ export default class Windy {
     return [u, v, Math.sqrt(u * u + v * v)];
   };
 
-  private getParticuleWind(p: Particule): Vector {
-    const lngLat = this.layer.canvasToMap(p.x, p.y);
-    const wind = this.grid.get(lngLat[0], lngLat[1]);
-    p.intensity = wind.intensity;
-    p.waveHeight = wind.waveHeight;
-    const mapArea = this.layer.mapBound.height * this.layer.mapBound.width;
-    var velocityScale = this.velocityScale * Math.pow(mapArea, 0.4);
-    this.layer.distort(lngLat[0], lngLat[1], p.x, p.y, velocityScale, wind);
-    return wind;
-  }
+    private getParticuleWind(p: Particule): Vector {
+        const lngLat = this.layer.canvasToMap(p.x, p.y);
+
+        // Use raw map longitude; let the grid handle IDL normalization.
+        const wind = this.grid.get(lngLat[0], lngLat[1]);
+        p.intensity = wind.intensity;
+        p.waveHeight = wind.waveHeight;
+
+        const mapArea = this.layer.mapBound.height * this.layer.mapBound.width;
+        var velocityScale = this.velocityScale * Math.pow(mapArea, 0.4);
+
+        // Keep distort consistent with the raw map coords
+        this.layer.distort(lngLat[0], lngLat[1], p.x, p.y, velocityScale, wind);
+        return wind;
+    }
+
 
 
 
