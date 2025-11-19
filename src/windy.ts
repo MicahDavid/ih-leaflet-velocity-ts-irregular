@@ -141,6 +141,7 @@ export default class Windy {
       // Check if data contains converted lat/lng arrays (from pixel coordinates)
       if (data.latitudes && data.longitudes) {
           this.isIrregularGrid = true;
+          console.log('irregular grid detected')
 
           // Extract u, v, and optional wave height data
           //const uValues = data.u || data.uData || [];
