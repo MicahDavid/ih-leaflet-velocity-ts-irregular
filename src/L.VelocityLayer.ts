@@ -19,6 +19,7 @@ export default class VelocityLayer {
 
   constructor() {
     this.options = {
+        debug: false,
       displayValues: true,
       displayOptions: {
         velocityType: 'Velocity',
