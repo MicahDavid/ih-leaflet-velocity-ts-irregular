@@ -86,6 +86,12 @@ export default class Windy {
     this["debug"] = (options as any).debug === true;
     // @ts-ignore
     this["forceVelocityScale"] = (options as any).forceVelocityScale;
+
+    // One-time confirmation that debug is on
+    // @ts-ignore
+    if (this["debug"]) {
+      console.log("[Velocity Debug] setOptions -> debug enabled");
+    }
   }
 
   public get particuleCount() {
@@ -237,6 +243,16 @@ export default class Windy {
           return;
       }
 
+      // Debug: verify grid dimensions and key flags
+      // @ts-ignore
+      if (this["debug"]) {
+        const expected = (this.ni || 0) * (this.nj || 0);
+        console.log("[Velocity Debug] setData -> isIrregularGrid:", this.isIrregularGrid, "ni:", this.ni, "nj:", this.nj, "grid.length:", grid.length, "expected:", expected);
+        if (expected && grid.length !== expected) {
+          console.warn("[Velocity Debug] grid size mismatch: data != lat*lon");
+        }
+      }
+
       // Debug intensity range
       // @ts-ignore
       if (this["debug"]) {
@@ -314,6 +330,11 @@ export default class Windy {
     }
 
     this.then = new Date().getTime();
+
+    // @ts-ignore
+    if (this["debug"]) {
+      console.log("[Velocity Debug] start -> particles:", this.particuleCount, "waveMode:", this.waveMode, "opacity:", this.opacity, "lineWidth:", this.particleLineWidth);
+    }
 
     this.frame();
   }
@@ -394,7 +415,6 @@ export default class Windy {
     // Optional debug sampling
     // @ts-ignore
     if (this["debug"]) {
-      // Log a tiny sample of zero vectors to detect dead fields
       if (!wind || (!isFinite(wind.u) || !isFinite(wind.v) || (Math.abs(wind.u) + Math.abs(wind.v) === 0))) {
         if (Math.random() < 0.001) {
           console.log("[Velocity Debug] zero/invalid wind at", { lng: λWrapped, lat: lngLat[1] });
