@@ -20,6 +20,9 @@ export default class CanvasLayer {
 	private _frame: number;
 	private _del: any;
     private _pendingRedraw: boolean = false; // Track if redraw is pending
+    private _paneName: string = 'overlayPane';
+    private _parentPane: HTMLElement | null = null;
+    private _zIndex: number | null = null;
 
 	public initialize(options: any) {
 		this._map = null;
@@ -27,6 +30,13 @@ export default class CanvasLayer {
 		this._frame = null;
 		this._del = null;
 		L.Util.setOptions(this, options);
+        // Accept Leaflet's `pane` option or a custom `paneName`
+        if (options && (options.pane || options.paneName)) {
+            this._paneName = options.pane || options.paneName;
+        }
+        if (options && typeof options.zIndex === 'number') {
+            this._zIndex = options.zIndex;
+        }
 	}
 
 	public getCanvas() {
@@ -75,8 +85,23 @@ export default class CanvasLayer {
 		const animated = this._map.options.zoomAnimation && L.Browser.any3d;
 		L.DomUtil.addClass(this._canvas, 'leaflet-zoom-' + (animated ? 'animated' : 'hide'));
 
+        // Resolve target pane by name, fall back to overlayPane
+        let targetPane: HTMLElement | null = null;
+        if ((map as any).getPane) {
+            targetPane = map.getPane(this._paneName) || map.getPane('overlayPane');
+        } else {
+            const panes = map.getPanes();
+            targetPane = (panes as any)[this._paneName] || panes.overlayPane;
+        }
+        this._parentPane = targetPane;
 
-		map.getPanes().overlayPane.appendChild(this._canvas);
+        // Optional: respect zIndex if provided
+        if (this._zIndex != null) {
+            this._canvas.style.zIndex = String(this._zIndex);
+        }
+
+        targetPane.appendChild(this._canvas);
+
 		map.on(this.getEvents() as any, this as any);
 
 		const del = this._del || this;
@@ -107,14 +132,15 @@ export default class CanvasLayer {
 
         this._pendingRedraw = false;
 
-        if (this._canvas && map.getPanes().overlayPane) {
-            map.getPanes().overlayPane.removeChild(this._canvas);
+        if (this._canvas && this._parentPane) {
+            this._parentPane.removeChild(this._canvas);
         }
 
 		map.off(this.getEvents() as any, this as any);
 
         this._canvas = null;
         this._map = null; // Explicitly clear the map reference
+        this._parentPane = null;
 
 	}
 

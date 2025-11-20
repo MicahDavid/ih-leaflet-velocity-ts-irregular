@@ -29,8 +29,6 @@ export default class Windy {
   private φ0: number;
   private Δλ: number;
   private Δφ: number;
-  private invΔλ: number; // precomputed reciprocals for faster math
-  private invΔφ: number;
   private ni: number;
   private nj: number;
   private canvas: any = null;
@@ -48,10 +46,9 @@ export default class Windy {
   private particules: Particule[] = [];
   private animationBucket: AnimationBucket;
   private context2D: any;
-  private rafId: number | null = null; // requestAnimationFrame id
+  private animationLoop: any = null;
   private frameTime: number;
   private then = 0;
-  private waveOffsetsCache: Map<number, number[]> = new Map(); // cache offsets arrays
 
 
   constructor(options: WindyOptions) {
@@ -132,13 +129,16 @@ export default class Windy {
       if (data.latitudes && data.longitudes) {
           this.isIrregularGrid = true;
 
-          // Build vector grid (once)
-          uData.data.forEach((u: number, index: number) => {
-            const wh = waveHeight !== null ? waveHeight.data[index] : undefined;
-            grid.push(new Vector(u, vData.data[index], wh));
-          });
+          // Extract u, v, and optional wave height data
+          //const uValues = data.u || data.uData || [];
+          //const vValues = data.v || data.vData || [];
+          //const whValues = data.waveHeight || [];
 
-          // Determine grid dimensions
+          // Build vector grid
+          // NOTE: grid was already filled above from uData/vData.
+          // Avoid pushing duplicates here.
+
+          // Determine grid dimensions with explicit typing for sort
           const uniqueLng = data.longitudes
           const uniqueLat = data.latitudes
           const width = uniqueLng.length;
@@ -162,6 +162,10 @@ export default class Windy {
               const λ1 = Math.max(...normalizedLongs);
               this.Δλ = width > 1 ? (λ1 - this.λ0) / (width - 1) : 1;
 
+              //console.log('Normalized longitude range:', this.λ0, 'to', λ1);
+              //console.log('Δλ:', this.Δλ);
+
+              // Convert back to -180/180 range if needed
               if (this.λ0 > 180) {
                   this.λ0 -= 360;
               }
@@ -181,15 +185,11 @@ export default class Windy {
           // Set approximate deltas (not used in irregular grid interpolation)
           this.Δλ = width > 1 ? (Math.max(...data.longitudes) - this.λ0) / (width - 1) : 1;
           this.Δφ = height > 1 ? (this.φ0 - Math.min(...data.latitudes)) / (height - 1) : 1;
-          // For irregular grid, reciprocals are not used in interpolate
-          this.invΔλ = this.Δλ ? 1 / this.Δλ : 0;
-          this.invΔφ = this.Δφ ? 1 / this.Δφ : 0;
 
       } else if (uData && vData) {
           // Original format - backward compatibility
           this.isIrregularGrid = false;
 
-          // Build vector grid (once)
           uData.data.forEach((u: number, index: number) => {
               const wh = waveHeight !== null ? waveHeight.data[index] : undefined;
               grid.push(new Vector(u, vData.data[index], wh));
@@ -209,8 +209,6 @@ export default class Windy {
           this.φ0 = uData.header.la1;
           this.Δλ = uData.header.dx;
           this.Δφ = uData.header.dy;
-          this.invΔλ = this.Δλ ? 1 / this.Δλ : 0;
-          this.invΔφ = this.Δφ ? 1 / this.Δφ : 0;
           this.ni = uData.header.nx;
           this.nj = uData.header.ny;
 
@@ -249,8 +247,8 @@ export default class Windy {
           return this.grid.get(λ, φ);
       }
 
-    var i = this.floorMod(λ - this.λ0, 360) * this.invΔλ; // multiply by reciprocal
-    var j = (this.φ0 - φ) * this.invΔφ; // multiply by reciprocal
+    var i = this.floorMod(λ - this.λ0, 360) / this.Δλ; // calculate longitude index in wrapped range [0, 360)
+    var j = (this.φ0 - φ) / this.Δφ; // calculate latitude index in direction +90 to -90
 
     var fi = Math.floor(i);
     var ci = fi + 1;
@@ -273,11 +271,8 @@ export default class Windy {
   };
 
   public start(layer: Layer) {
-    // Prefer desynchronized 2D context to reduce blocking
-    this.context2D = this.canvas.getContext("2d", { alpha: true, desynchronized: true } as any);
+    this.context2D = this.canvas.getContext("2d");
     this.context2D.lineWidth = this.particleLineWidth;
-    this.context2D.lineCap = "butt";
-    this.context2D.lineJoin = "butt";
     const fadeOpacity = this.waveMode ? 0.75 : this.opacity;
     this.context2D.fillStyle = `rgba(0, 0, 0, ${fadeOpacity})`;
     this.context2D.globalAlpha = this.waveMode ? 0.2 : 0.6;
@@ -290,7 +285,7 @@ export default class Windy {
       this.particules.push(this.layer.canvasBound.getRandomParticule(this.particleAge));
     }
 
-    this.then = performance.now();
+    this.then = new Date().getTime();
 
     this.frame();
   }
@@ -298,9 +293,10 @@ export default class Windy {
   public stop() {
     this.particules.splice(0, this.particules.length);
     this.animationBucket?.clear();
-    if (this.rafId !== null) {
-      cancelAnimationFrame(this.rafId);
-      this.rafId = null;
+    if (this.animationLoop) {
+      clearTimeout(this.animationLoop);
+      cancelAnimationFrame(this.animationLoop);
+      this.animationLoop = null;
     }
   }
 
@@ -370,10 +366,10 @@ export default class Windy {
 
 
   private frame() {
-    this.rafId = requestAnimationFrame(() => {
+    this.animationLoop = requestAnimationFrame(() => {
       this.frame()
     });
-    var now = performance.now();
+    var now = new Date().getTime();
     var delta = now - this.then;
     if (delta > this.frameTime) {
       this.then = now - (delta % this.frameTime);
@@ -430,15 +426,6 @@ export default class Windy {
       return offsets;
   }
 
-  private getOffsets(count: number): number[] {
-    // Cache wave offsets arrays by count to avoid per-frame allocations
-    const cached = this.waveOffsetsCache.get(count);
-    if (cached) return cached;
-    const created = this.generateOffsets(count);
-    this.waveOffsetsCache.set(count, created);
-    return created;
-  }
-
   private calculateWaveParticles(waveHeight: number): number {
     if (waveHeight < 0.5) return 4;
     if (waveHeight < 0.7) return 5;
@@ -473,27 +460,23 @@ export default class Windy {
         g.beginPath();
         g.strokeStyle = this.colorScale.colorAt(i);
 
-        // Use classic for-loop to reduce iterator overhead in hot path
-        for (let k = 0; k < bucket.length; k++) {
-          const particle = bucket[k];
+        bucket.forEach((particle: Particule) => {
           const dx = particle.xt - particle.x;
           const dy = particle.yt - particle.y;
-          const mag = Math.hypot(dx, dy);
+          const mag = Math.sqrt(dx * dx + dy * dy);
 
-          const invMag = mag ? 1 / mag : 0;
-          const perpX = -dy * invMag;
-          const perpY =  dx * invMag;
-          const normX =  dx * invMag;
-          const normY =  dy * invMag;
+          const perpX = mag ? -dy / mag : 0;
+          const perpY = mag ? dx / mag : 0;
+          const normX = mag ? dx / mag : 0;
+          const normY = mag ? dy / mag : 0;
 
           const waveHeight =  particle.waveHeight || 1;
           const numWaveParticles = this.calculateWaveParticles(waveHeight);
-          const offsets = this.getOffsets(numWaveParticles);
+          const offsets = this.generateOffsets(numWaveParticles);
           const SEPARATION = this.wavesParticlesSeparation;
           const maxOffset = 3.5;
 
-          for (let oi = 0; oi < offsets.length; oi++) {
-              const offset = offsets[oi];
+          offsets.forEach((offset) => {
 
               const shiftX = perpX * offset * SEPARATION;
               const shiftY = perpY * offset * SEPARATION;
@@ -507,11 +490,11 @@ export default class Windy {
 
               g.moveTo(startX, startY);
               g.lineTo(endX, endY);
-          }
+          });
 
           particle.x = particle.xt;
           particle.y = particle.yt;
-        }
+        });
 
         g.stroke();
       }

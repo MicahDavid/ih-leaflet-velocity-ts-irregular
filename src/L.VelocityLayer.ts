@@ -69,18 +69,30 @@ export default class VelocityLayer {
     // determine where to add the layer
     this._paneName = this.options.paneName || "overlayPane";
 
-    // fall back to overlayPane for leaflet < 1
-    let pane = map.getPanes().overlayPane;
-    if (map.getPane) {
-      // attempt to get pane first to preserve parent (createPane voids this)
-      pane = map.getPane(this._paneName);
-      if (!pane) {
-        pane = map.createPane(this._paneName);
+    // Only create a pane if it truly doesn't exist (avoid recreating built-ins like 'tilePane')
+    let pane = map.getPane ? map.getPane(this._paneName) : (map.getPanes() as any)[this._paneName];
+    if (!pane && map.getPane) {
+      pane = map.createPane(this._paneName);
+    }
+
+    // create canvas, add overlay control
+    // We still pass the desired pane name in case the factory honors it
+    this._canvasLayer = L.canvasLayer({ pane: this._paneName, paneName: this._paneName, zIndex: this.options.zIndex }).delegate(this);
+    this._canvasLayer.addTo(map);
+
+    // Force-move the canvas into the target pane to guarantee placement
+    const targetPane =
+      (map.getPane && map.getPane(this._paneName)) ||
+      (map.getPanes && (map.getPanes() as any)[this._paneName]) ||
+      map.getPanes().overlayPane;
+
+    const canvasEl = this._canvasLayer.getCanvas && this._canvasLayer.getCanvas();
+    if (canvasEl && targetPane && canvasEl.parentElement !== targetPane) {
+      targetPane.appendChild(canvasEl);
+      if (typeof this.options.zIndex === 'number') {
+        canvasEl.style.zIndex = String(this.options.zIndex);
       }
     }
-    // create canvas, add overlay control
-    this._canvasLayer = L.canvasLayer().delegate(this);
-    this._canvasLayer.addTo(map);
 
     this._map = map;
 
